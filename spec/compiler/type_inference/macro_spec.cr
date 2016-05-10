@@ -792,4 +792,44 @@ describe "Type inference: macro" do
       Foo(Int32).new.t
       )) { int32.metaclass }
   end
+
+  it "gets named arguments in single splat" do
+    assert_type(%(
+      macro foo(*args)
+        {{args}}
+      end
+
+      foo 1, 'a', x: "foo", y: true
+      )) { tuple_of([int32, char, named_tuple_of({"x": string, "y": bool})]) }
+  end
+
+  it "gets named arguments in double splat" do
+    assert_type(%(
+      macro foo(**options)
+        {{options}}
+      end
+
+      foo x: "foo", y: true
+      )) { named_tuple_of({"x": string, "y": bool}) }
+  end
+
+  it "uses splat and double splat" do
+    assert_type(%(
+      macro foo(*args, **options)
+        { {{args}}, {{options}} }
+      end
+
+      foo 1, 'a', x: "foo", y: true
+      )) { tuple_of([tuple_of([int32, char]), named_tuple_of({"x": string, "y": bool})]) }
+  end
+
+  it "double splat and regular args" do
+    assert_type(%(
+      macro foo(x, y, **options)
+        { {{x}}, {{y}}, {{options}} }
+      end
+
+      foo 1, w: 'a', y: true, z: "z"
+      )) { tuple_of([int32, bool, named_tuple_of({"w": char, "z": string})]) }
+  end
 end

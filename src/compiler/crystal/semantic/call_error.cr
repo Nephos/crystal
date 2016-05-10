@@ -21,11 +21,11 @@ class Crystal::ASTNode
 end
 
 class Crystal::Call
-  def raise_matches_not_found(owner : CStructType, def_name, matches = nil)
+  def raise_matches_not_found(owner : CStructType, def_name, arg_types, named_args_types, matches = nil)
     raise_struct_or_union_field_not_found owner, def_name
   end
 
-  def raise_matches_not_found(owner : CUnionType, def_name, matches = nil)
+  def raise_matches_not_found(owner : CUnionType, def_name, arg_types, named_args_types, matches = nil)
     raise_struct_or_union_field_not_found owner, def_name
   end
 
@@ -42,7 +42,7 @@ class Crystal::Call
     end
   end
 
-  def raise_matches_not_found(owner, def_name, matches = nil)
+  def raise_matches_not_found(owner, def_name, arg_types, named_args_types, matches = nil)
     # Special case: Foo+:Class#new
     if owner.is_a?(VirtualMetaclassType) && def_name == "new"
       raise_matches_not_found_for_virtual_metaclass_new owner
@@ -133,14 +133,7 @@ class Crystal::Call
       raise error_msg, owner_trace
     end
 
-    real_args_size = self.args.sum do |arg|
-      arg_type = arg.type
-      if arg.is_a?(Splat) && arg_type.is_a?(TupleInstanceType)
-        arg_type.tuple_types.size
-      else
-        1
-      end
-    end
+    real_args_size = arg_types.size
 
     # If it's on an initialize method and there's a similar method name, it's probably a typo
     if (def_name == "initialize" || def_name == "new") && (similar_def = owner.instance_type.lookup_similar_def("initialize", self.args.size, block))
@@ -178,7 +171,7 @@ class Crystal::Call
       all_arguments_sizes.uniq!.sort!
 
       raise(String.build do |str|
-        unless check_single_def_error_message(defs, str)
+        unless check_single_def_error_message(defs, named_args_types, str)
           str << "wrong number of arguments for '"
           str << full_name(owner, def_name)
           str << "' (given "
@@ -223,33 +216,21 @@ class Crystal::Call
     arg_names = [] of Array(String)
 
     message = String.build do |msg|
-      unless check_single_def_error_message(defs, msg)
+      unless check_single_def_error_message(defs, named_args_types, msg)
         msg << "no overload matches '#{full_name(owner, def_name)}'"
         unless args.empty?
-          types = [] of Type
-          args.each_with_index do |arg|
-            arg_type = arg.type
-
-            if arg.is_a?(Splat) && arg_type.is_a?(TupleInstanceType)
-              arg_type.tuple_types.each_with_index do |tuple_type, sub_index|
-                types << tuple_type
-              end
-            else
-              types << arg_type
-            end
-          end
           msg << " with type"
-          msg << "s" if types.size > 1 || @named_args
+          msg << "s" if arg_types.size > 1 || named_args_types
           msg << " "
-          types.join(", ", msg)
+          arg_types.join(", ", msg)
         end
 
-        if named_args = @named_args
-          named_args.each do |named_arg|
+        if named_args_types
+          named_args_types.each do |named_arg|
             msg << ", "
             msg << named_arg.name
             msg << ": "
-            msg << named_arg.value.type
+            msg << named_arg.type
           end
         end
 
@@ -290,8 +271,7 @@ class Crystal::Call
 
   # If there's only one def that could match, and there are named
   # arguments in this call, we can give a better error message.
-  def check_single_def_error_message(defs, io)
-    named_args = self.named_args
+  def check_single_def_error_message(defs, named_args, io)
     return false unless named_args
     return false unless defs.size == 1
 
@@ -357,7 +337,8 @@ class Crystal::Call
     return unless !matches || (matches.try &.empty?)
     return unless defs.all? &.abstract?
 
-    signature = CallSignature.new(def_name, args.map(&.type), block, named_args)
+    named_args_types = NamedArgumentType.from_args(named_args)
+    signature = CallSignature.new(def_name, args.map(&.type), block, named_args_types)
     defs.each do |a_def|
       context = MatchContext.new(owner, a_def.owner)
       match = MatchesLookup.match_def(signature, DefWithMetadata.new(a_def), context)
@@ -405,8 +386,9 @@ class Crystal::Call
   def self.append_def_full_name(owner, a_def, str)
     str << full_name(owner, a_def.name)
     str << '('
+    printed = false
     a_def.args.each_with_index do |arg, i|
-      str << ", " if i > 0
+      str << ", " if printed
       str << '*' if a_def.splat_index == i
       str << arg.name
       if arg_default = arg.default_value
@@ -428,9 +410,22 @@ class Crystal::Call
           str << res
         end
       end
+      printed = true
     end
 
-    str << ", &block" if a_def.yields
+    if a_def.double_splat
+      str << ", " if printed
+      str << "**" << a_def.double_splat
+      printed = true
+    end
+
+    if block_arg = a_def.block_arg
+      str << ", " if printed
+      str << "&" << block_arg.name
+    elsif a_def.yields
+      str << ", " if printed
+      str << "&block"
+    end
     str << ")"
   end
 
