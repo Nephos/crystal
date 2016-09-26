@@ -64,7 +64,7 @@ $(O)/all_spec: deps $(SOURCES) $(SPEC_SOURCES)
 
 $(O)/std_spec: deps $(SOURCES) $(SPEC_SOURCES)
 	@mkdir -p $(O)
-	$(BUILD_PATH) ./bin/crystal build $(FLAGS) -o $@ spec/std_spec.cr
+	$(BUILD_PATH) ./bin/crystal build $(FLAGS) -o $@ spec/std/static_array_spec.cr
 
 $(O)/compiler_spec: deps $(SOURCES) $(SPEC_SOURCES)
 	@mkdir -p $(O)

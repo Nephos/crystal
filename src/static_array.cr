@@ -163,6 +163,25 @@ struct StaticArray(T, N)
     self
   end
 
+  def map
+    clone.map! { |e| yield e }
+  end
+
+  def map_with_index!
+    i = 0
+    to_unsafe.map!(size) do |e|
+      i += 1
+      yield e, i - 1
+    end
+    self
+  end
+
+  def map_with_index
+    clone.map_with_index! do |e, i|
+      yield e, i
+    end
+  end
+
   # Reverses the elements of this array in-place, then returns `self`
   #
   # ```
@@ -172,6 +191,10 @@ struct StaticArray(T, N)
   def reverse!
     to_slice.reverse!
     self
+  end
+
+  def reverse
+    clone.reverse!
   end
 
   # Returns a slice that points to the elements of this static array.
